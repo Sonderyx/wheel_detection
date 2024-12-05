@@ -1,0 +1,367 @@
+This code is originally from https://github.com/saki4510t/UVCCamera/
+It was modified by infiray, and later by netman.
+And by now everything was rewritten by netman except libuvc_build/libuvc.mk xD
+Ghidra was really useful to figure out what's in libthermometry.so and XthermDLL.DLL and the fact
+  there are versions for many platforms also helped.
+
+This whole thing is an Android Studio / Gradle project, either should work to compile it whichever
+  way you normally build your android studio projects (I open the project with android studio and
+  press the run button). If that doesn't work ask Netman about it. Use of the app itself should be
+  self-evident, if not I've failed at the UI design.
+
+A short what-is-what:
+	libinficam  - Has the native (C, C++) library stuff to talk to the camera and a JNI binding to
+	  couple this to Java for the android app, the JNI binding has a small amount of Android
+	  specific stuff so it can write the thermal image to a Surface object. The C++ stuff does all
+	  the processing to turn the cameras output into a palettized thermal image and numbers in
+	  celsius, but a palette has to be provided externally. The headers have a fair amount of info
+	  on how to use it and it should all be reasonably portable. Android handles USB devices a bit
+	  funny though so to port this code to another OS you may want to look at UVCDevice.connect()
+	  and InfiCam.connect(), other than that it should be relatively straightforward in use.
+	app         - Has the Android UI stuff, pallete generation, etc. It gets somewhat involved when
+	  you look at the SurfaceMuxer class, but this is not for no reason, EGL allows us to use
+	  hardware to handle the scaling and combining of the various things we want to visualize and
+	  we **need** to use EGL anyway if we want to write to a video with Android's MediaCodec stuff.
+
+The versions of third party things in libinficam/src/main/jni dir:
+	libusb    - master at 4622bfcf44db373c53502e3fe873bd611e8332f6 (untouched)
+	libuvc    - master at 15925fed1a08462965a2d24a585a0b0c41d6a9ef (patched)
+		modified stream.c to prevent a segmentation fault when starting streams
+			it was merged upstream, now we are at commit e3f36909ec37b1892ac944872fe9f0369f5601bd
+		again patched stream.c to fix a disconnect issue
+			again merged upstream, now identical to d3318ae72a2b916ae352ad0abbbfa2c0990f455e
+
+Quick description of what for the Java classes are:
+	- BaseActivity      the rug under which i swept the mess that is fullscreen mode and requesting
+	                      camera/file permissions, provides a handler that mainactivity uses too
+	- BatteryLevel      battery level indicator widget
+	- CameraView        SurfaceView with some fluff to draw the image onto
+	- MainActivity      inherits BaseActivity, it's the main activity obviously, sticks most other
+	                      classes together into a usable app
+	- MessageView       a thing for showing messages on the screen, alike Androids Toast stuff
+	- NormalCamera      wrapper for using the visible light camera builtin to the phone
+	- Overlay           drawing temperature measurements on the thermal image etc
+	- Palette           generating palettes for the thermal image
+	- Settings          abstract class used to make the various settings windows
+	- SettingsMain      the main settings window
+	- SettingsMeasure   turn on/off measurements
+	- SettingsTherm     thermometry settings like emissivity, ambient temperature, etc
+	- SettingsPalette   for switching palette and the likes
+	- Slider            improved SeekBar
+	- SliderDouble      improved "material" RangeSlider
+	- SurfaceMuxer      multiplexing for android Surface things (basically framebuffers) handles
+	                      scaling them and splitting the video between the screen and video file
+	                      output and the likes
+	- SurfaceRecorder   gives a Surface that can be drawn to by SurfaceMuxer to get a video file
+	                      written, optionally records audio too
+	- USBMonitor        tells us when USB devices are disconnected, wraps the permission requests
+	                      for USB devices
+	- Util              static functions that don't belong somewhere else
+
+Short description of the C++ classes in jni/InfiCam dir:
+	- UVCDevice     just a wrapper around libuvc, reason for it existing is that using libuvc with
+	    android gets pretty involved
+	- InfiFrame     that's where i dumped everything to do with analyzing a frame as it comes out
+	    of the camera
+	- InfiCam       connecting to the camera, feeding the frames to InifFrame class, etc
+	- InfiCamJNI    whatever garbage is needed to glue InfiCam class to the Java end
+
+I try to keep the amount of threads limited as to prevent headaches, we have the following threads:
+	- Androids UI thread.
+	- MainActivity.imgCompressThread, deals with compressing images by Bitmap.compress()
+	- SurfaceRecorder.thread, shovels data from the video/audio encoders out, separated because
+	    swapBuffers() in SurfaceMuxer on the UI thread would block if somehow it gets called too
+	    often before the encoders buffers have been emptied.
+	- usb_thread in UVCDevice.cpp, to repeatedly call libusb's message handling function.
+	- libuvc has a thread to call the callback we give it, be copy out the data and post to a
+	    handler on the UI thread to further process the data from that (while blocking it until
+	    the processing is done).
+
+TODO ui stuff
+	- different states for UI interactions:
+		* add measurement point/line/area
+		* zoom/pan the video overlay
+	- make sure there is space to show palette thing on the side (including lock icons!)
+		* for video we can just give sizes that are big enough as option
+	- show average temp somewhere?
+	- perhaps allow choosing separate resolutions for portrait pics/video
+		* maybe instead we should just widen images by as much needed to fit the extra bar in it
+			when it is set to be outside of image
+	- gallery to check pictures and videos taken
+	- open gallery in the right folder (done but not for samsung gallery)
+	- show camera product and version info somewhere (perhaps when scroll down in settings)
+	- choose which palettes are allowed for the next palette button
+	- presets for the settings
+	- improve the layout and check that it works with most common aspect ratios
+	- option to show min/max/avg/center in list at top left
+		* current buttons for them stay as-is, if they are checked and the list one -> show marker without temp
+		    if only the list one is hown just show in list but not marker
+	- option to show emissivity, ambient, etc on screen
+	- document stuff that isn't obvious like the pinch to zoom
+	- maybe UI can be like we add one extra button and it cycles between zoom, pan/zoom visible light (if on), add measurement of type ..
+		* show momentarily what's picked with showMessage/shortMessage, put small icon somewhere
+		* perhaps on first press before mode changed just show current?
+		* how to remove measurements?
+			** perhaps double/triple tap can delete last point / clear all
+				(and/or 2-3 finger touches, maybe, double tapping would be better to not interfere with line/box mode)
+			** line/box should just reposition nearest point if start again the touching, their interface can probably be shared logic-wise
+		* like with palette cycle, add list to enable/disable which ones cycle and a setting item
+	        for the current mode
+	- graph over time temperature(s) of selected point/area (the plural meaning min/max/avg)
+	- cram side-by-side video on screen somehow? dual vertical on horizontal or vice-versa screen if asked?
+	- also indicate to user when in 400c mode more clearly
+	- put in documentation that linear/nearest interpolation is better if performance issues
+	- on older android versions restarting through ADB can result in "failed to start streaming"
+	- perhaps improve UI for manual range setting
+		* maybe enter as center + span rather than min + max?
+		* separate locking for min and max of range
+		* option to just limit the range instead of locking it
+	- listen for physical camera button keycode
+	- should we have to option to apply sharpening before calculating temperature?
+	- for portrait mode put horizontal palette preview under image instead of in the image
+	- mode to act as streaming endpoint
+	- more permanent test picture when not connected, to test interpolation modes etc
+	- the nearest neighbor interpolation sucks for smaller sizes, fix it
+	- shutterless mode? cmd 0x8002 may help https://www.researchgate.net/publication/292188068_Shutter-less_calibration_of_uncooled_infrared_cameras
+	- user setting for protection max temp, default to something a bit higher than the range
+	- + and - buttons for precise adjustment of sliders perhaps
+	- fix the flickering that occurs when aimed at say a tree or grass as shown in video from vicky
+	- 7silver7 has instant crash on start (with or without camera) on Samsung S9, Android 10
+	    * Workaround added in SurfaceMuxer.java, need to investigate further (eglTerminate() triggers the crash)
+	- time-lapse feature
+	- starting video recording fails (samsung note 9 t2s+, valeska on discord)
+		java.lang.IllegalStateException: writeSampleData returned an error
+		at android.media.MediaMuxer.nativeWriteSampleData(Native Method)
+		at android.media.MediaMuxer.writeSampleData(MediaMuxer.java:694)
+		at be.ntmn.inficam.SurfaceRecorder.run(SurfaceRecorder.java:259)
+		at java.lang.Thread.run(Thread.java:919)
+	- set emissivity by picking from a list of common materials (make so you can edit the list ofc)
+	- capture by volume buttons (perhaps have settings so can also start video and do other common things with those)
+	- galaxy note 8 orientation somehow not sensed (WHY on discord)
+	- samsung galery on note 8 shows only last image somehow (WHY on discord)
+	- add the pallete i was asked about in pm
+	- indication of already recorded time
+
+TODO thermal camera things
+	- more measurement modes (point, line, rect)
+		* way to store location of those for next time
+	- 9 point grid rectangle for measuring
+	- store thermometry data in videos and pictures
+	- allow to regenerate images and videos from thermometry data, measure from it
+	- proper ironbow palette (real ones get lighter after they go yellow)
+	- more palettes in general
+	- custom palette loading from images (png, bmp)
+
+TODO normal camera things
+	- perhaps the modes can be called "thermal", "combined"/"fusion", "picture-in-picture"
+	- choose resolution for the normal camera (maybe just trying 1080p/720p/VGA/SVGA or close depending on setting is ok)
+	- showing of normal camera also (and allow choosing which one, rotation)
+	- overlaying normal camera (with edge detect)
+	- option to save separate normal and thermal image side by side (what about video?)
+	- this will be useful https://tomoima525.medium.com/how-to-programmatically-control-preview-size-of-android-camera-app-62c26168b784
+
+Notes about the current implentation for end users:
+	400c mode looks a bit quirky before a few calibration cycles, while it doesn't on xtherm
+	  the reason is that xtherm just scales the palette to the raw input data linearly but inficam
+	  first calculates the temperatures puts the palette on those, and below a certain point the
+	  temperatures can't be calculated at all. There still is some image information in the parts
+	  where temperatures can not be calculated, but if we want to make it visible we have to scale
+	  the palette beyond what we can slap a number in celsius on, and I don't see a sensible way to
+	  present this to the user hence I'll leave this as it is.
+	targetSdkVersion has to be <= 27 or lower for the app to work on some Android 10 devices and
+	  there isn't anything much we can do about that, it can be higher for other devices. It
+	  is because of the following bug in Android itself:
+	    https://issuetracker.google.com/issues/145082934
+	    https://issuetracker.google.com/issues/139087809
+
+Things i learned about the protocol these thermal cameras talk:
+	last 4 lines of the frame have parameters (note that the pointer math is in steps of 16 bytes because unsigned short)
+		unsigned short *fourLinePara = orgData + requestWidth * (requestHeight - 4);
+
+	there's an offset depending on the width, again note that the pointer math is in steps of 16 bytes because unsigned short
+		int amountPixels=0;
+		switch (requestWidth)
+		{
+			case 384:
+				amountPixels=requestWidth*(4-1);
+				break;
+			case 240:
+				amountPixels=requestWidth*(4-3);
+				break;
+			case 256:
+				amountPixels=requestWidth*(4-3);
+				break;
+			case 640:
+				amountPixels=requestWidth*(4-1);
+				break;
+				// NOTE there's more info about this in libthermometry.so
+		}
+
+	uint8_t *param = fourLinePara;
+
+		Location  | Datatype        | Parameter
+		------------------------------------------------------
+		  0 -   2 | 16bit uint      | FPA Average, whatever that means (also detectAvg somewhere)
+		  2 -   4 | 16bit uint      | FPA temperature (convert to celsius is weird and depends on camera)
+		  4 -   6 | 16bit uint      | Max point X
+		  6 -   8 | 16bit uint      | Max point Y
+		  8 -  10 | 16bit uint      | Max temperature
+		 10 -  12 | 16bit uint      | Min point X
+		 12 -  14 | 16bit uint      | Min point Y
+		 14 -  16 | 16bit uint      | Min temperature
+		 16 -  18 | 16bit uint      | Average temperature (orgAvg elsewhere)
+		 18 -  24 | ???             | ??? (unused by software)
+		 24 -  26 | 16bit uint      | Center temperature
+		 26 -  28 | 16bit uint      | User point 1 temperature
+		 28 -  30 | 16bit uint      | User point 2 temperature
+		 30 -  32 | 16bit uint      | User point 3 temperature
+
+	uint8_t *param = fourLinePara + amountPixels
+
+		Location  | Datatype        | Parameter
+		------------------------------------------------------
+		  0 -   2 | 16bit uint      | ??? (cal_00 / v5 / cx) (presumeably calibration value)
+		  2 -   4 | 16bit uint      | Shutter temperature (times 10, in kelvin)
+		  4 -   6 | 16bit uint      | Core temperature (times 10, in kelvin)
+		  6 -  10 | float (32bit)   | ??? (cal_01 / flt_10003360) (presumeably calibration value)
+		 10 -  14 | float (32bit)   | ??? (cal_02 / flt_1000335C) (presumeably calibration value)
+		 14 -  18 | float (32bit)   | ??? (cal_03 / flt_1000339C) (presumeably calibration value)
+		 18 -  22 | float (32bit)   | ??? (cal_04 / flt_10003398) (presumeably calibration value)
+		 22 -  26 | float (32bit)   | ??? (cal_05 / flt_10003394) (presumeably calibration value)
+		 26 -  48 | ???             | ??? (unused by software)
+		 48 -  64 | 16 byte string  | Firmware version
+		 64 -  80 | 16 byte string  | Serial number
+		 80 -  95 | 16 byte string  | Product name
+		 95 - 254 | ???             | ??? (unused by software)
+		---User area, writeable by ABS_ZOOM command-----------
+		254 - 258 | float (32bit)   | Correction
+		258 - 262 | float (32bit)   | Reflected temperature
+		262 - 266 | float (32bit)   | Air temperature
+		266 - 270 | float (32bit)   | Humidity
+		270 - 274 | float (32bit)   | Emissivity
+		274 - 278 | 16bit uint      | Distance (NOTE i want to try and see if i can store a float there)
+		278 - ??? | ???             | Possibly more user area (presumeably 128 bytes of it, java reads that much)
+
+	The user values are saved by:
+		setValue(UVCCamera.CTRL_ZOOM_ABS, 0x80ff);
+
+	CTRL_ZOOM_ABS is used with the following commands:
+		- < 0x80 in the high byte as an adress to write the low byte in user area
+		- 0x8000 to click the shutter and do a darkframe calibration
+		- 0x8001 do a darkframe calibration without clicking the shutter
+		- 0x8002 sets the camera to raw frame output mode, without darkframe compensation
+		- 0x8003 some other mode, not sure what
+		- 0x8004 called on start, not sure what it does, "切换数据输出8004原始8005yuv,80ff保存"
+			* 8005 sets a different mode, the camera seems to default to 0x8004
+				... or the camera remembers the last mode... maybe 0x80FF saves this too?
+			* Strong indications the output is YUV encoded video in 8005 mode.
+		- 0x8020 to set -20 to 120C range (followed by shutter)
+		- 0x8021 to set 120 to 400C range (followed by shutter)
+		- 0x80FF (as before) to store user area in non-volatile storage
+		- 0xEC.., 0xEE.. Mark dead pixel with x, y to low bytes? "用户盲元表" (MainActivity from
+		    the original SDK suggests as much)
+	NOTE the user manuals apparently mention some of these commands
+
+Some maybe useful trivia:
+	* Generating an ironbow palette:
+		uint32_t palette[InfiCam::palette_len];
+		for (int i = 0; i + 4 <= sizeof(palette); i += 4) {
+			double x = (double) i / (double) sizeof(palette);
+			((uint8_t *) palette)[i + 0] = round(255 * sqrt(x));
+			((uint8_t *) palette)[i + 1] = round(255 * pow(x, 3));
+			((uint8_t *) palette)[i + 2] = round(255 * fmax(0, sin(2 * M_PI * x)));
+			((uint8_t *) palette)[i + 3] = 255;
+		}
+		cam.set_palette(palette);
+
+	* Generating a rainbow palette:
+		// TODO add partial (0-270 degrees) rainbow, where cold is blue and red is hot
+		for (int i = 0; i + 4 <= sizeof(ic.palette); i += 4) {
+			double h = 360.0 - (double) i / (double) sizeof(ic.palette) * 360.0;
+			double x = (1 - abs(fmod(h / 60.0, 2) - 1));
+			double r, g, b;
+			if (h >= 0 && h < 60)
+				r = 1, g = x, b = 0;
+			else if (h >= 60 && h < 120)
+				r = x, g = 1, b = 0;
+			else if (h >= 120 && h < 180)
+				r = 0, g = 1, b = x;
+			else if (h >= 180 && h < 240)
+				r = 0, g = x, b = 1;
+			else if (h >= 240 && h < 300)
+				r = x, g = 0, b = 1;
+			else r = 1, g = 0, b = x;
+			((uint8_t *) ic.palette)[i + 0] = round(255 * r);
+			((uint8_t *) ic.palette)[i + 1] = round(255 * g);
+			((uint8_t *) ic.palette)[i + 2] = round(255 * b);
+			((uint8_t *) ic.palette)[i + 3] = 255;
+		}
+
+	drawing stuff to a bitmap for overlay
+		// First is just drawing to a bitmap, we may not need this
+		Bitmap bmp = Bitmap.createBitmap(640, 480, Bitmap.Config.ARGB_8888);
+		Canvas c = new Canvas(bmp);
+		Paint p = new Paint();
+		p.setColor(Color.TRANSPARENT);
+		c.drawRect(new Rect(0, 0, 640, 480), p);
+		c.drawLine(0, 0, 640, 480, p2);
+
+		Paint p2 = new Paint();
+		p2.setColor(Color.RED);
+		SurfaceMuxer.InputSurface is = new SurfaceMuxer.InputSurface(surfaceMuxer, true);
+		SurfaceTexture st = is.getSurfaceTexture();
+		st.setDefaultBufferSize(640, 480);
+		//st.setOnFrameAvailableListener(et2);
+		Surface s = is.getSurface();
+		Canvas cvs = s.lockCanvas(null);
+		//cvs.drawBitmap(bmp, 0, 0, null);
+		cvs.drawLine(0, 0, 640, 480, p2);
+		s.unlockCanvasAndPost(cvs);
+		surfaceMuxer.inputSurfaces.add(is);
+
+	use of the CameraTest class
+		/*askPermission(Manifest.permission.CAMERA, granted -> {
+			if (granted) {
+				SurfaceTexture ist = surfaceMuxer.createInputSurfaceTexture();
+				ist.setDefaultBufferSize(1280, 960);
+				CameraTest ct = new CameraTest();
+				ct.initCamera2(this, new Surface(ist));
+				//ist.setOnFrameAvailableListener(surfaceMuxer); // TODO set the right one
+			} else {
+				showMessage(R.string.permdenied_cam, true);
+			}
+		});*/
+
+On the stackoverflow that inspired the cubic interpolation shader (
+	https://stackoverflow.com/questions/13501081/efficient-bicubic-filtering-code-in-glsl )
+	the idea of applying the same concept with Catmull-Rom interpolation is mentioned, but this
+	does not work for reasons I only partially understand, i've played around with it though and
+	thus I have implemented the basis functions for that, maybe it's useful some day:
+		vec4 cmspline(float x) { // See: DOI:10.3390/mca21030033
+			float x2 = x * x;
+			float x3 = x2 * x;
+			float a = 1.0;
+			return vec4(
+				(-x + 2.0 * x2 - x3) * a,
+				2.0 + (a - 6.0) * x2 + (4.0 - a) * x3,
+				x * a + (6.0 - 2.0 * a) * x2 - (4.0 - a) * x3,
+				(-x2 + x3) * a
+			) * 0.5;
+		}
+
+To test the interpolation i slapped this into onCreate()
+	// We may need setSize on the InputSurface() if we do this again
+	// TODO this is just test for interpolation
+	/*SurfaceMuxer.InputSurface test = new SurfaceMuxer.InputSurface(surfaceMuxer, SurfaceMuxer.IMODE_NEAREST);
+      test.getSurfaceTexture().setDefaultBufferSize(8, 6);
+      test.setSize(8, 6);
+      Canvas tcvs = test.getSurface().lockCanvas(null);
+      Paint p = new Paint();
+      tcvs.drawColor(Color.YELLOW);
+      p.setColor(Color.BLUE);
+      tcvs.drawLine(0, 6, 8, 0, p);
+      p.setColor(Color.RED);
+      tcvs.drawLine(0, 0, 8, 6, p);
+      test.getSurface().unlockCanvasAndPost(tcvs);
+      surfaceMuxer.inputSurfaces.add(test);
+      //surfaceMuxer.onFrameAvailable(test.getSurfaceTexture());*/

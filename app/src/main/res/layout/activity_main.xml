@@ -1,0 +1,350 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.constraintlayout.widget.ConstraintLayout
+	xmlns:android="http://schemas.android.com/apk/res/android"
+	xmlns:app="http://schemas.android.com/apk/res-auto"
+	xmlns:tools="http://schemas.android.com/tools"
+	tools:context=".MainActivity"
+	android:id="@+id/mainLayout"
+	android:layout_width="match_parent"
+	android:layout_height="match_parent"
+	android:background="@color/black">
+
+
+	<FrameLayout
+		android:id="@+id/frameLayout"
+		android:layout_width="0dp"
+		android:layout_height="0dp"
+		android:layout_marginEnd="220dp"
+		app:layout_constraintBottom_toBottomOf="parent"
+		app:layout_constraintEnd_toEndOf="parent"
+		app:layout_constraintStart_toStartOf="parent"
+		app:layout_constraintTop_toTopOf="parent">
+
+		<be.ntmn.inficam.CameraView
+			android:id="@+id/cameraView"
+			android:layout_width="match_parent"
+			android:layout_height="match_parent" />
+
+		<be.ntmn.inficam.MessageView
+			android:id="@+id/message"
+			android:layout_width="wrap_content"
+			android:layout_height="wrap_content"
+			android:layout_gravity="center"
+			android:background="@drawable/message_background"
+			android:gravity="center"
+			android:paddingHorizontal="12dp"
+			android:paddingVertical="5dp"
+			android:text="@string/msg_disconnected"
+			android:textAppearance="@style/TextAppearance.AppCompat.Large"
+			android:textColor="@color/white" />
+
+	</FrameLayout>
+
+	<!-- Добавляем RelativeLayout здесь -->
+
+	<TextView
+		android:id="@+id/zoomLevel"
+		android:layout_margin="15dp"
+		android:layout_width="wrap_content"
+		android:layout_height="wrap_content"
+		android:textColor="@color/white"
+		app:layout_constraintBottom_toBottomOf="parent"
+		app:layout_constraintEnd_toEndOf="parent" />
+
+	<LinearLayout
+		android:layout_width="wrap_content"
+		android:layout_height="wrap_content"
+		android:orientation="vertical"
+		android:id="@+id/buttonsLeft"
+		app:layout_constraintTop_toTopOf="parent"
+		app:layout_constraintBottom_toBottomOf="parent"
+		app:layout_constraintStart_toStartOf="parent">
+
+		<ImageButton
+			android:id="@+id/buttonLock"
+			android:src="@drawable/ic_baseline_lock_open_24"
+			android:contentDescription="@string/btn_lock"
+			android:layout_width="40dp"
+			android:layout_height="40dp"
+			android:scaleType="fitCenter"
+			android:layout_margin="5dp"
+			android:hapticFeedbackEnabled="false"
+			app:tint="@color/white"
+			android:background="?android:attr/selectableItemBackground" />
+
+		<ImageButton
+			android:id="@+id/buttonPalette"
+			android:src="@drawable/ic_baseline_palette_24"
+			android:contentDescription="@string/btn_palette"
+			android:layout_width="40dp"
+			android:layout_height="40dp"
+			android:scaleType="fitCenter"
+			android:layout_margin="5dp"
+			android:hapticFeedbackEnabled="false"
+			app:tint="@color/white"
+			android:background="?android:attr/selectableItemBackground" />
+
+		<ImageButton
+			android:id="@+id/buttonSettingsMeasure"
+			android:src="@drawable/ic_baseline_location_searching_24"
+			android:contentDescription="@string/btn_settings_measure"
+			android:layout_width="40dp"
+			android:layout_height="40dp"
+			android:scaleType="fitCenter"
+			android:layout_margin="5dp"
+			android:hapticFeedbackEnabled="false"
+			app:tint="@color/white"
+			android:background="?android:attr/selectableItemBackground" />
+
+		<ImageButton
+			android:id="@+id/buttonSettingsTherm"
+			android:src="@drawable/ic_baseline_device_thermostat_24"
+			android:contentDescription="@string/btn_settings_therm"
+			android:layout_width="40dp"
+			android:layout_height="40dp"
+			android:scaleType="fitCenter"
+			android:layout_margin="5dp"
+			android:hapticFeedbackEnabled="false"
+			app:tint="@color/white"
+			android:background="?android:attr/selectableItemBackground" />
+
+		<ImageButton
+			android:id="@+id/buttonSettings"
+			android:src="@drawable/ic_baseline_settings_24"
+			android:contentDescription="@string/btn_settings"
+			android:layout_width="40dp"
+			android:layout_height="40dp"
+			android:scaleType="fitCenter"
+			android:layout_margin="5dp"
+			android:hapticFeedbackEnabled="false"
+			app:tint="@color/white"
+			android:background="?android:attr/selectableItemBackground" />
+
+		<be.ntmn.inficam.BatteryLevel
+			android:id="@+id/batLevel"
+			android:layout_width="40dp"
+			android:layout_height="40dp"
+			android:layout_margin="5dp" />
+
+	</LinearLayout>
+
+	<be.ntmn.inficam.SliderDouble
+		android:id="@+id/rangeSlider"
+		android:visibility="gone"
+		app:labelBehavior="gone"
+		app:tickVisible="false"
+		android:layout_width="wrap_content"
+		android:layout_height="match_parent"
+		app:layout_constraintTop_toTopOf="parent"
+		app:layout_constraintLeft_toRightOf="@id/buttonsLeft" />
+
+	<LinearLayout
+		android:layout_width="wrap_content"
+		android:layout_height="wrap_content"
+		android:orientation="vertical"
+		android:id="@+id/buttonsRight"
+		app:layout_constraintTop_toTopOf="parent"
+		app:layout_constraintBottom_toBottomOf="parent"
+		app:layout_constraintEnd_toEndOf="parent">
+
+		<ImageButton
+			android:id="@+id/buttonShutter"
+			android:src="@drawable/ic_baseline_camera_24"
+			android:contentDescription="@string/btn_shutter"
+			android:layout_width="40dp"
+			android:layout_height="40dp"
+			android:scaleType="fitCenter"
+			android:layout_margin="5dp"
+			android:hapticFeedbackEnabled="false"
+			app:tint="@color/white"
+			android:background="?android:attr/selectableItemBackground" />
+
+		<ImageButton
+			android:id="@+id/buttonPhoto"
+			android:src="@drawable/ic_baseline_photo_camera_24"
+			android:contentDescription="@string/btn_photo"
+			android:layout_width="60dp"
+			android:layout_height="60dp"
+			android:scaleType="fitCenter"
+			android:layout_margin="5dp"
+			android:hapticFeedbackEnabled="false"
+			app:tint="@color/white"
+			android:background="?android:attr/selectableItemBackground" />
+
+		<ImageButton
+			android:id="@+id/buttonVideo"
+			android:src="@drawable/ic_baseline_videocam_24"
+			android:contentDescription="@string/btn_video"
+			android:layout_width="40dp"
+			android:layout_height="40dp"
+			android:scaleType="fitCenter"
+			android:layout_margin="5dp"
+			android:hapticFeedbackEnabled="false"
+			app:tint="@color/white"
+			android:background="?android:attr/selectableItemBackground" />
+
+		<ImageButton
+			android:id="@+id/buttonGallery"
+			android:src="@drawable/ic_baseline_photo_library_24"
+			android:contentDescription="@string/btn_gallery"
+			android:layout_width="40dp"
+			android:layout_height="40dp"
+			android:scaleType="fitCenter"
+			android:layout_margin="5dp"
+			android:hapticFeedbackEnabled="false"
+			app:tint="@color/white"
+			android:background="?android:attr/selectableItemBackground" />
+
+	</LinearLayout>
+
+	<androidx.constraintlayout.widget.ConstraintLayout
+		android:id="@+id/dialogBackground"
+		android:background="@color/dialog_background"
+		android:layout_width="match_parent"
+		android:layout_height="match_parent"
+		android:visibility="gone"
+		app:layout_constraintTop_toTopOf="parent"
+		app:layout_constraintBottom_toBottomOf="parent"
+		app:layout_constraintStart_toStartOf="parent"
+		app:layout_constraintEnd_toEndOf="parent">
+
+		<TextView
+			android:id="@+id/dialogTitle"
+			android:layout_gravity="top|center_horizontal"
+			android:textSize="20sp"
+			android:textColor="@color/white"
+			app:layout_constraintBottom_toTopOf="@id/dialog"
+			app:layout_constraintLeft_toLeftOf="parent"
+			app:layout_constraintRight_toRightOf="parent"
+			android:layout_margin="5dp"
+			android:layout_width="wrap_content"
+			android:layout_height="wrap_content" />
+
+		<ScrollView
+			android:id="@+id/dialog"
+			android:layout_width="wrap_content"
+			android:layout_height="wrap_content"
+			android:background="?attr/colorBackgroundFloating"
+			app:layout_constrainedHeight="true"
+			app:layout_constraintTop_toTopOf="parent"
+			app:layout_constraintBottom_toBottomOf="parent"
+			app:layout_constraintLeft_toLeftOf="parent"
+			app:layout_constraintRight_toRightOf="parent"
+			android:layout_margin="35dp"
+			android:layout_gravity="center"
+			android:gravity="center">
+			<FrameLayout
+				android:id="@+id/dialogs"
+				android:layout_width="wrap_content"
+				android:layout_height="wrap_content">
+
+				<be.ntmn.inficam.SettingsMain
+					android:id="@+id/settings"
+					android:orientation="vertical"
+					android:padding="20dp"
+					android:minWidth="250dp"
+					android:showDividers="middle"
+					android:divider="@drawable/settings_divider"
+					android:layout_width="match_parent"
+					android:layout_height="wrap_content" />
+
+				<be.ntmn.inficam.SettingsTherm
+					android:id="@+id/settingsTherm"
+					android:orientation="vertical"
+					android:padding="20dp"
+					android:minWidth="250dp"
+					android:showDividers="middle"
+					android:divider="@drawable/settings_divider"
+					android:layout_width="match_parent"
+					android:layout_height="wrap_content" />
+
+				<be.ntmn.inficam.SettingsMeasure
+					android:id="@+id/settingsMeasure"
+					android:orientation="vertical"
+					android:padding="20dp"
+					android:minWidth="250dp"
+					android:showDividers="middle"
+					android:divider="@drawable/settings_divider"
+					android:layout_width="match_parent"
+					android:layout_height="wrap_content" />
+
+				<be.ntmn.inficam.SettingsPalette
+					android:id="@+id/settingsPalette"
+					android:orientation="vertical"
+					android:padding="20dp"
+					android:minWidth="250dp"
+					android:showDividers="middle"
+					android:divider="@drawable/settings_divider"
+					android:layout_width="wrap_content"
+					android:layout_height="wrap_content" />
+
+			</FrameLayout>
+		</ScrollView>
+
+
+
+	</androidx.constraintlayout.widget.ConstraintLayout>
+
+
+	<RelativeLayout
+		android:id="@+id/vis"
+		android:layout_width="218dp"
+		android:layout_height="594dp"
+		app:layout_constraintBottom_toBottomOf="parent"
+		app:layout_constraintEnd_toEndOf="parent"
+		app:layout_constraintStart_toEndOf="@+id/frameLayout"
+		app:layout_constraintTop_toTopOf="parent"
+		tools:context=".MainActivity">
+		<!--		app:layout_constraintStart_toEndOf="@+id/frameLayout"-->
+
+		<org.opencv.android.JavaCameraView
+			android:id="@+id/cameraViewVis"
+			android:layout_width="match_parent"
+			android:layout_height="match_parent" />
+
+		<TextView
+			android:id="@+id/textView"
+			android:layout_width="wrap_content"
+			android:layout_height="wrap_content"
+			android:layout_below="@+id/cameraViewVis"
+			android:layout_centerHorizontal="true"
+			android:layout_marginTop="-40dp"
+			android:text=""
+			android:textColor="@color/white"
+			android:textSize="16sp" />
+
+	</RelativeLayout>
+
+
+<!--	<RelativeLayout-->
+<!--		android:id="@+id/myRelativeLayout"-->
+<!--		android:layout_width="214dp"-->
+<!--		android:layout_height="729dp"-->
+<!--		app:layout_constraintBottom_toBottomOf="parent"-->
+<!--		app:layout_constraintStart_toEndOf="@+id/frameLayout">-->
+
+<!--		&lt;!&ndash; Элементы внутри RelativeLayout &ndash;&gt;-->
+<!--		<TextView-->
+<!--			android:id="@+id/myTextView"-->
+<!--			android:layout_width="wrap_content"-->
+<!--			android:layout_height="wrap_content"-->
+<!--			android:layout_centerHorizontal="true"-->
+<!--			android:layout_marginTop="20dp"-->
+<!--			android:text="Hello World" />-->
+
+<!--		<Button-->
+<!--			android:id="@+id/myButton"-->
+<!--			android:layout_width="wrap_content"-->
+<!--			android:layout_height="wrap_content"-->
+<!--			android:layout_below="@id/myTextView"-->
+<!--			android:layout_centerHorizontal="true"-->
+<!--			android:layout_marginTop="20dp"-->
+<!--			android:text="Click Me" />-->
+
+<!--	</RelativeLayout>-->
+
+
+</androidx.constraintlayout.widget.ConstraintLayout>
+
+
+
