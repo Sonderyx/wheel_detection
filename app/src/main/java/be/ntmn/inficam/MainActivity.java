@@ -53,23 +53,36 @@ import androidx.constraintlayout.widget.ConstraintLayout;
 import org.opencv.android.CameraActivity;
 import org.opencv.android.CameraBridgeViewBase;
 import org.opencv.android.OpenCVLoader;
+import org.opencv.android.Utils;
 import org.opencv.core.Core;
 import org.opencv.core.CvType;
 import org.opencv.core.Mat;
 import org.opencv.core.MatOfRect;
+import org.opencv.core.Point;
 import org.opencv.core.Scalar;
 import org.opencv.core.Size;
 import org.opencv.imgproc.Imgproc;
+import org.tensorflow.lite.DataType;
+import org.tensorflow.lite.Interpreter;
+import org.tensorflow.lite.support.common.FileUtil;
+import org.tensorflow.lite.support.image.TensorImage;
+import org.tensorflow.lite.support.label.Category;
+import org.tensorflow.lite.support.tensorbuffer.TensorBuffer;
 //import org.opencv.objdetect.CascadeClassifier;
 
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.io.StringWriter;
+import java.nio.MappedByteBuffer;
 import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.locks.Condition;
 import java.util.concurrent.locks.ReentrantLock;
 
+import be.ntmn.inficam.ml.BestFloat16;
+//import be.ntmn.inficam.ml.*;
+//import be.ntmn.inficam.ml.BestFloat32;
+import be.ntmn.inficam.ml.BestFloat32;
 import be.ntmn.libinficam.InfiCam;
 
 
@@ -124,14 +137,11 @@ public class MainActivity extends BaseActivity {
 
 
 	CameraBridgeViewBase cameraBridgeViewBase;
-//	CascadeClassifier cascadeClassifier;
 	Mat gray, rgb;
-	//    Mat transpose_gray, transpose_rgb;
-//	MatOfRect rects;
-	TextView label;
-	int facesCount;
-	int tempLength;
-//	float[] glob_temp;
+	TextView label_wheel_count;
+
+	int rows = 288; // Количество строк
+	int cols = 384; // Количество столбцов
 	private static final float[] glob_temp = new float[110592];
 
 
@@ -326,10 +336,6 @@ public class MainActivity extends BaseActivity {
 		public void onReceive(Context context, Intent intent) { updateBatLevel(intent); }
 	};
 
-//	Mat match_vis_ir(Mat gray, float[] temp) {
-//
-//	}
-
 	/* This is called by infiCam to run every frame, it calls applyPalette which writes the surface
 	 *   we get the thermal image from, it's good to do the work like applying palette and doing
 	 *   complicated measurements here to avoid blocking the main thread. Once this is done we fill
@@ -349,68 +355,7 @@ public class MainActivity extends BaseActivity {
 			synchronized (frameLock) { /* Note this is called from another thread. */
 				overlayData.fi = fi;
 
-
-//				// Умножаем все значения пикселей на 5
-//				for (int i = 0; i < temp.length; i++) {
-//					temp[i] *= 5;
-//				}
-//				// Обновляем минимальное и максимальное значение температуры, если это необходимо
-//				float minTemp = Float.MAX_VALUE;
-//				float maxTemp = -Float.MAX_VALUE;
-//				for (float t : temp) {
-//					if (t < minTemp) minTemp = t;
-//					if (t > maxTemp) maxTemp = t;
-//				}
-//				// Обновляем диапазоны для порогов
-//				overlayData.rangeMin = minTemp;
-//				overlayData.rangeMax = maxTemp;
-//				Log.
-
-//				saveTempLengthToFile
-//
-//				// Получаем путь к рабочему столу (или к общедоступному каталогу)
-//				File path = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS); // Местоположение для сохранения
-//				if (!path.exists()) {
-//					path.mkdirs(); // Создаем директорию, если она не существует
-//				}
-//
-//				// Создаем новый файл на рабочем столе
-//				File file = new File(path, "temp_length.txt");
-//
-//				try {
-//					// Создаем поток вывода для записи в файл
-//					FileOutputStream fos = new FileOutputStream(file);
-//					OutputStreamWriter writer = new OutputStreamWriter(fos);
-//
-//					// Записываем длину массива temp в файл
-//					writer.write("temp.length = " + temp.length + "\n");
-//
-//					// Закрываем поток
-//					writer.close();
-//					fos.close();
-//
-//					Log.d("SaveTemp", "Данные успешно записаны в файл: " + file.getAbsolutePath());
-//				} catch (IOException e) {
-//					e.printStackTrace();
-//					Log.e("SaveTemp", "Ошибка записи в файл", e);
-//				}
-
-
-
-//				tempLength = temp.length;
 				System.arraycopy(temp, 0, glob_temp, 0, temp.length);
-
-				runOnUiThread(new Runnable() {
-					@Override
-					public void run() {
-						label.setText(getString(R.string.test, temp.length));
-					}
-				});
-
-//				Toast toast = new Toast();
-//				toast.setText();
-//				Toast.makeText(MainActivity.this, "Length = " + tempLength, Toast.LENGTH_SHORT).show();
-
 
 				overlayData.temp = temp;
 				float rangeMin = overlayData.rangeMin;
@@ -451,8 +396,6 @@ public class MainActivity extends BaseActivity {
 				handler.post(handleFrameRunnable);
 				if (disconnecting)
 					return;
-//				Toast toast = new Toast();
-//				toast.setText();
 				/* Now we wait until the main thread has finished drawing the frame, so lastFi and
 				 *   lastTemp don't get overwritten before they've been used.
 				 */
@@ -553,6 +496,44 @@ public class MainActivity extends BaseActivity {
 		}
 	}
 
+	/**
+	 * Применяет фильтр Собеля с предварительным размытием для подавления шума.
+	 *
+	 * @param src Исходное изображение (Mat), которое должно быть в формате CV_8UC1 или CV_8UC3.
+	 * @param dst Результирующее изображение (Mat), результат будет в формате rtype.
+	 * @param rtype Выходной формат изображения.
+	 */
+	public static void applySobelWithBlur(Mat src, Mat dst, int rtype) {
+		// Проверяем, что входное изображение не пустое
+		if (src.empty()) {
+			throw new IllegalArgumentException("Source image is empty!");
+		}
+
+		// Гауссово размытие для подавления шума
+		Mat blurred = new Mat();
+		Imgproc.GaussianBlur(src, blurred, new Size(5, 5), 0);
+
+		// Применение оператора Собеля
+		Mat sobelX = new Mat();
+		Mat sobelY = new Mat();
+		Imgproc.Sobel(blurred, sobelX, CvType.CV_32F, 1, 0, 3); // Собель по X
+		Imgproc.Sobel(blurred, sobelY, CvType.CV_32F, 0, 1, 3); // Собель по Y
+
+		// Вычисление градиентной амплитуды
+		Mat magnitude = new Mat();
+		Core.magnitude(sobelX, sobelY, magnitude);
+
+		// Преобразование результата в формат CV_8U
+		magnitude.convertTo(dst, rtype);
+
+		// Освобождение временных Mat для предотвращения утечек памяти
+		blurred.release();
+		sobelX.release();
+		sobelY.release();
+		magnitude.release();
+	}
+
+
 	private void overTempLockout() {
 		messageView.showMessage(R.string.msg_overtemp);
 		infiCam.calibrate();
@@ -588,8 +569,11 @@ public class MainActivity extends BaseActivity {
 		//-------------------------------
 		getPermission();
 		cameraBridgeViewBase = findViewById(R.id.cameraViewVis);
-		label = findViewById(R.id.textView);
-		label.setText("Start");
+		label_wheel_count = findViewById(R.id.textView);
+		label_wheel_count.setText("Start");
+
+
+
 
 		cameraBridgeViewBase.setCvCameraViewListener(new CameraBridgeViewBase.CvCameraViewListener2() {
 			@Override
@@ -606,115 +590,404 @@ public class MainActivity extends BaseActivity {
 //				rects.release();
 			}
 
+//			@Override
+//			public Mat onCameraFrame(CameraBridgeViewBase.CvCameraViewFrame inputFrame) {
+////				Log.d("OpenCV", "Captured frame");
+////                Imgproc.resize(inputFrame.gray(), gray, new Size(320, 240));
+////                Imgproc.resize(inputFrame.rgba(), rgb, new Size(320, 240));
+////				Imgproc.resize(inputFrame.rgba(), rgb, inputFrame.rgba().size());
+////				rgb = inputFrame.rgba();
+////
+//
+////				for (int i = 0; i < glob_temp.length; i++) {
+////					glob_temp[i] = (float) (Math.random() * 255); // Заполнение случайными значениями от 0 до 255
+////				}
+//
+//
+//				int rows = 288; // Количество строк
+//				int cols = 384; // Количество столбцов
+//
+//				// Создаем Mat для хранения данных
+//				Mat mat = new Mat(rows, cols, CvType.CV_32F);
+//
+//				// Заполняем Mat из одномерного массива
+//				mat.put(0, 0, glob_temp);
+//
+//				// Нормализуем данные в диапазон [0, 255]
+//				Core.normalize(mat, mat, 0, 255, Core.NORM_MINMAX);
+//				mat.convertTo(mat, CvType.CV_8U);
+//				Core.transpose(mat, mat);
+//				Core.flip(mat, mat, 1);
+//
+//
+//				try {
+//					BestFloat32 model = BestFloat32.newInstance(getApplicationContext());
+//
+//					// Creates inputs for reference.
+//					Bitmap bitmap = Bitmap.createBitmap(mat.cols(), mat.rows(), Bitmap.Config.ARGB_8888);
+//					Utils.matToBitmap(mat, bitmap);
+//					TensorImage image = TensorImage.fromBitmap(bitmap);
+//
+//					// Runs model inference and gets result.
+//					BestFloat32.Outputs outputs = model.process(image);
+//					List<Category> output = outputs.getOutputAsCategoryList();
+//
+//					// Releases model resources if no longer used.
+//					model.close();
+//				} catch (IOException e) {
+//					// TODO Handle the exception
+//				}
+//
+//				Imgproc.resize(mat, mat, inputFrame.rgba().size());
+//
+//				return mat;
+////				mat
+//
+////				return rgb;
+//			}
+
+
+//			@Override
+//			public Mat onCameraFrame(CameraBridgeViewBase.CvCameraViewFrame inputFrame) {
+//				try {
+//					// Получение изображения из камеры
+//					Mat inputMat = inputFrame.rgba();
+//
+//					// Преобразование входного изображения в требуемый формат: [1, 256, 256, 3] float32
+//					Mat resizedMat = new Mat();
+//					Imgproc.resize(inputMat, resizedMat, new Size(256, 256)); // Изменение размера на 256x256
+////					resizedMat.convertTo(resizedMat, CvType.CV_32F, 1.0 / 255.0); // Нормализация [0, 1]
+//
+//					applySobelWithBlur(resizedMat, resizedMat);
+//
+//					// Преобразование Mat в Bitmap
+//					Bitmap bitmap = Bitmap.createBitmap(resizedMat.cols(), resizedMat.rows(), Bitmap.Config.ARGB_8888);
+//					Utils.matToBitmap(resizedMat, bitmap);
+//
+//					// Преобразование Bitmap в TensorImage
+//					TensorImage image = new TensorImage(DataType.FLOAT32);
+//					image.load(bitmap);
+//
+//					// Загрузка модели TFLite
+//					BestFloat32 model = BestFloat32.newInstance(getApplicationContext());
+//
+//					// Выполнение инференса
+//					BestFloat32.Outputs outputs = model.process(image);
+////					List<Category> output = outputs.getOutputAsCategoryList();
+////					TensorBuffer outputBuffer = outputs.
+////					TensorBuffer outputBuffer = outputs.getOutputFeature0AsTensorBuffer();
+////
+////					// Получение выходного массива
+////					float[] outputArray = outputBuffer.getFloatArray();
+////
+////					// Обработка результатов
+////					int detectionCount = outputArray.length / 5; // Каждая детекция содержит 5 чисел
+////					for (int i = 0; i < detectionCount; i++) {
+////						// Извлечение координат, вероятности и класса
+////						float x_min = outputArray[i * 5] * inputMat.cols(); // Масштабируем обратно к исходному размеру
+////						float y_min = outputArray[i * 5 + 1] * inputMat.rows();
+////						float x_max = outputArray[i * 5 + 2] * inputMat.cols();
+////						float y_max = outputArray[i * 5 + 3] * inputMat.rows();
+////						float score = outputArray[i * 5 + 4];
+////
+////						// Фильтрация по вероятности (например, порог = 0.5)
+////						if (score > 0.5) {
+////							// Рисуем прямоугольник на исходном изображении
+////							Point pt1 = new Point(x_min, y_min);
+////							Point pt2 = new Point(x_max, y_max);
+////							Imgproc.rectangle(inputMat, pt1, pt2, new Scalar(255, 0, 0), 2);
+////
+////							// Выводим текст (оценка вероятности)
+////							Imgproc.putText(
+////									inputMat,
+////									String.format("Conf: %.2f", score),
+////									new Point(x_min, y_min - 10),
+////									Imgproc.FONT_HERSHEY_SIMPLEX,
+////									0.5,
+////									new Scalar(255, 255, 255),
+////									2
+////							);
+////						}
+////					}
+//
+//					// Закрытие модели после использования
+//					model.close();
+//
+//					// Возвращаем обработанное изображение
+//					return inputMat;
+//
+//				} catch (IOException e) {
+//					e.printStackTrace();
+//					// В случае ошибки возвращаем оригинальное изображение
+//					return inputFrame.rgba();
+//				}
+//			}
+
+
 			@Override
 			public Mat onCameraFrame(CameraBridgeViewBase.CvCameraViewFrame inputFrame) {
-				Log.d("OpenCV", "Captured frame");
-//                Imgproc.resize(inputFrame.gray(), gray, new Size(320, 240));
-//                Imgproc.resize(inputFrame.rgba(), rgb, new Size(320, 240));
-//				Imgproc.resize(inputFrame.rgba(), rgb, inputFrame.rgba().size());
-//				rgb = inputFrame.rgba();
-//				gray = inputFrame.gray();
+				try {
 
-//				cascadeClassifier.detectMultiScale(gray, rects, 1.1, 3, 0, new Size(30, 30), new Size());
+//					// Создаем Mat для тепляка
+//					Mat mat_ir = new Mat(rows, cols, CvType.CV_32F);
+//					mat_ir.put(0, 0, glob_temp);
+//
+//					// Нормализуем данные в диапазон [0, 255] и переворачиваем
+//					Core.normalize(mat_ir, mat_ir, 0, 255, Core.NORM_MINMAX);
+//					mat_ir.convertTo(mat_ir, CvType.CV_8U);
+//					Core.transpose(mat_ir, mat_ir);
+//					Core.flip(mat_ir, mat_ir, 1);
 
-//				for(org.opencv.core.Rect rect:rects.toList()) {
-//					Mat submat = rgb.submat(rect);
-//					Imgproc.rectangle(rgb, rect, new Scalar(0, 255, 0), 10);
-//					submat.release();
-//				}
 
-				// Refresh label
-//				facesCount = rects.rows();
-//				runOnUiThread(new Runnable() {
-//					@Override
-//					public void run() {
-//						label.setText(getString(R.string.faces_count, facesCount));
+
+
+
+					// Получение изображения из камеры
+//					Mat inputMat = inputFrame.rgba();
+//					Imgproc.cvtColor(inputMat, inputMat, Imgproc.COLOR_RGBA2RGB);
+
+					Mat inputMat = new Mat();
+					Imgproc.cvtColor(inputFrame.rgba(), inputMat, Imgproc.COLOR_RGBA2GRAY);
+
+					// Преобразование входного изображения в требуемый формат: [1, 256, 256, 3] float32
+					Mat resizedMat = new Mat();
+					Imgproc.resize(inputMat, resizedMat, new Size(256, 256)); // Изменение размера на 256x256
+					resizedMat.convertTo(resizedMat, CvType.CV_32F, 1.0 / 255.0); // Нормализация [0, 1]
+
+					applySobelWithBlur(resizedMat, resizedMat, CvType.CV_32F);
+
+					// Преобразование Mat в массив
+					float[][][][] inputArray = new float[1][256][256][3];
+					resizedMat.get(0, 0, inputArray[0][0][0]);
+
+					// Загрузка модели вручную
+					MappedByteBuffer tfliteModel = FileUtil.loadMappedFile(getApplicationContext(), "best_float16.tflite");
+					Interpreter tflite = new Interpreter(tfliteModel);
+
+					// Подготовка для выхода модели
+					float[][][] outputArray = new float[1][5][1344];
+//					float[][][] outputArray = new float[1][6][1344];
+
+					// Выполнение инференса
+					tflite.run(inputArray, outputArray);
+
+					// Обработка результатов
+					int detectionCount = outputArray[0][0].length / 5; // Каждая детекция содержит 5 чисел
+//					int detectionCount = outputArray[0][0].length / 6;
+
+					runOnUiThread(new Runnable() {
+						@Override
+						public void run() {
+							label_wheel_count.setText(getString(R.string.label_wheels, detectionCount));
+						}
+					});
+
+					Mat outputMat = inputMat.clone();
+					for (int i = 0; i < detectionCount; i++) {
+						// Извлечение координат, вероятности и класса
+						float x_min = outputArray[0][0][i * 5] * inputMat.cols(); // Масштабируем обратно к исходному размеру
+						float y_min = outputArray[0][0][i * 5 + 1] * inputMat.rows();
+						float x_max = outputArray[0][0][i * 5 + 2] * inputMat.cols();
+						float y_max = outputArray[0][0][i * 5 + 3] * inputMat.rows();
+						float score = outputArray[0][0][i * 5 + 4];
+
+//						float x_min = outputArray[0][0][i * 5]; // Масштабируем обратно к исходному размеру
+//						float y_min = outputArray[0][0][i * 5 + 1];
+//						float x_max = outputArray[0][0][i * 5 + 2];
+//						float y_max = outputArray[0][0][i * 5 + 3];
+//						float score = outputArray[0][0][i * 5 + 4];
+
+						// Фильтрация по вероятности (например, порог = 0.5)
+						if (score > 0.9) {
+							// Рисуем прямоугольник на исходном изображении
+							Point pt1 = new Point(x_min, y_min);
+							Point pt2 = new Point(x_max, y_max);
+							Imgproc.rectangle(outputMat, pt1, pt2, new Scalar(255, 0, 0), 2);
+
+							// Выводим текст (оценка вероятности)
+							Imgproc.putText(
+									outputMat,
+									String.format("Conf: %.2f", score),
+									new Point(x_min, y_min - 10),
+									Imgproc.FONT_HERSHEY_SIMPLEX,
+									0.5,
+									new Scalar(255, 255, 255),
+									2
+							);
+						}
+					}
+//
+//					for (int i = 0; i < detectionCount; i++) {
+//						// Индекс начала текущей детекции
+//						int startIdx = i * 6;
+//
+//						// Извлекаем координаты, уверенность и класс
+//						float xMin = outputArray[0][0][startIdx];
+//						float yMin = outputArray[0][0][startIdx + 1];
+//						float xMax = outputArray[0][0][startIdx + 2];
+//						float yMax = outputArray[0][0][startIdx + 3];
+//						float confidence = outputArray[0][0][startIdx + 4];
+//						int classId = (int) outputArray[0][0][startIdx + 5];
+//
+//						// Фильтрация по уверенности
+//						if (confidence > 0.9) { // Порог вероятности
+//							// Масштабируем координаты обратно к размеру исходного изображения
+//							xMin *= inputMat.cols();
+//							yMin *= inputMat.rows();
+//							xMax *= inputMat.cols();
+//							yMax *= inputMat.rows();
+//
+//							// Рисуем прямоугольник на изображении
+//							Point pt1 = new Point(xMin, yMin);
+//							Point pt2 = new Point(xMax, yMax);
+//							Imgproc.rectangle(outputMat, pt1, pt2, new Scalar(255, 0, 0), 2);
+//
+//							// Выводим текст: вероятность и класс
+//							String label = String.format("Class: %d, Conf: %.2f", classId, confidence);
+//							Imgproc.putText(
+//									outputMat,
+//									label,
+//									new Point(xMin, yMin - 10), // Немного выше верхнего левого угла
+//									Imgproc.FONT_HERSHEY_SIMPLEX,
+//									0.5, // Размер текста
+//									new Scalar(255, 255, 255), // Цвет текста
+//									2 // Толщина текста
+//							);
+//						}
 //					}
-//				});
-//				Log.d("OpenCV", "Processed frame");
+					for (int i = 0; i < outputArray[0][0].length / 5; i++) {
+						Log.d("ModelOutput", String.format(
+								"Detection %d: [%f, %f, %f, %f, %f]",
+								i,
+								outputArray[0][0][i * 5],
+								outputArray[0][0][i * 5 + 1],
+								outputArray[0][0][i * 5 + 2],
+								outputArray[0][0][i * 5 + 3],
+								outputArray[0][0][i * 5 + 4]
+						));
+					}
 
-//
+
+					// Освобождение ресурсов модели
+					tflite.close();
+
+					// Возвращаем обработанное изображение
+					return outputMat;
 
 
-//
-//				for (int i = 0; i < glob_temp.length; i++) {
-//					glob_temp[i] = (float) (Math.random() * 255); // Заполнение случайными значениями от 0 до 255
-//				}
+//					Imgproc.resize(inputMat, inputMat, inputFrame.rgba().size());
+//					return inputMat;
 
+					// гаусс с собелем
+//					Core.normalize(resizedMat, resizedMat, 0, 255, Core.NORM_MINMAX);
+//					resizedMat.convertTo(resizedMat, CvType.CV_8U);
+////					Imgproc.cvtColor(resizedMat, resizedMat, Imgproc.COLOR_GRAY2RGBA);
+//					Imgproc.resize(resizedMat, resizedMat, inputFrame.rgba().size());
+//					return resizedMat;
 
-				int rows = 288; // Количество строк
-				int cols = 384; // Количество столбцов
-				if (glob_temp.length != rows * cols) {
-					throw new IllegalArgumentException("Размер массива не соответствует ожидаемому размеру 288x384");
+					// исходное
+//					return inputFrame.rgba();
+
+					// тепляк  исходное
+//					Imgproc.resize(mat_ir, mat_ir, inputFrame.rgba().size());
+//					return mat_ir;
+
+				} catch (IOException e) {
+					e.printStackTrace();
+					// В случае ошибки возвращаем оригинальное изображение
+					return inputFrame.rgba();
 				}
-
-				// Создаем Mat для хранения данных
-				Mat mat = new Mat(rows, cols, CvType.CV_32F);
-
-				// Заполняем Mat из одномерного массива
-				mat.put(0, 0, glob_temp);
-
-				// Нормализуем данные в диапазон [0, 255]
-				Core.normalize(mat, mat, 0, 255, Core.NORM_MINMAX);
-
-
-				mat.convertTo(mat, CvType.CV_8U);
-
-				Core.transpose(mat, mat);
-				Core.flip(mat, mat, 1); //
-
-				Imgproc.resize(mat, mat, inputFrame.rgba().size());
-				return mat;
-//				mat
-
-//				return rgb;
 			}
+
+//
+//			@Override
+//			public Mat onCameraFrame(CameraBridgeViewBase.CvCameraViewFrame inputFrame) {
+//				try {
+//					// Получение изображения из камеры
+//					Mat inputMat = inputFrame.rgba();
+//
+//					// Преобразование входного изображения в требуемый формат: [1, 256, 256, 3] float32
+//					Mat resizedMat = new Mat();
+//					Imgproc.resize(inputMat, resizedMat, new Size(256, 256)); // Изменение размера на 256x256
+//					resizedMat.convertTo(resizedMat, CvType.CV_32F, 1.0 / 255.0); // Нормализация [0, 1]
+//
+//					// Преобразование Mat в формат CV_8UC3 для Bitmap
+//					Mat convertedMat = new Mat();
+//					resizedMat.convertTo(convertedMat, CvType.CV_8UC3, 255.0); // Обратно в [0, 255] и конвертация в 8-битный формат
+//
+//					// Преобразование Mat в Bitmap
+//					Bitmap bitmap = Bitmap.createBitmap(convertedMat.cols(), convertedMat.rows(), Bitmap.Config.ARGB_8888);
+//					Utils.matToBitmap(convertedMat, bitmap);
+//
+//					// Преобразование Bitmap в TensorImage
+//					TensorImage image = new TensorImage(DataType.FLOAT32);
+//					image.load(bitmap);
+//
+//					// Загрузка модели
+//					BestFloat32 model = BestFloat32.newInstance(getApplicationContext());
+//
+//					// Выполнение инференса
+//					BestFloat32.Outputs outputs = model.process(image);
+//					List<Category> output = outputs.getOutputAsCategoryList();
+////					TensorBuffer outputBuffer = outputs.getOutputFeature0AsTensorBuffer();
+////
+////					// Получение выходного массива
+////					float[] outputArray = outputBuffer.getFloatArray();
+////
+////					// Обработка результатов
+////					int detectionCount = outputArray.length / 5; // Каждая детекция содержит 5 чисел
+////					for (int i = 0; i < detectionCount; i++) {
+////						// Извлечение координат, вероятности и класса
+////						float x_min = outputArray[i * 5] * inputMat.cols(); // Масштабируем обратно к исходному размеру
+////						float y_min = outputArray[i * 5 + 1] * inputMat.rows();
+////						float x_max = outputArray[i * 5 + 2] * inputMat.cols();
+////						float y_max = outputArray[i * 5 + 3] * inputMat.rows();
+////						float score = outputArray[i * 5 + 4];
+////
+////						// Фильтрация по вероятности (например, порог = 0.5)
+////						if (score > 0.5) {
+////							// Рисуем прямоугольник на исходном изображении
+////							Point pt1 = new Point(x_min, y_min);
+////							Point pt2 = new Point(x_max, y_max);
+////							Imgproc.rectangle(inputMat, pt1, pt2, new Scalar(255, 0, 0), 2);
+////
+////							// Выводим текст (оценка вероятности)
+////							Imgproc.putText(
+////									inputMat,
+////									String.format("Conf: %.2f", score),
+////									new Point(x_min, y_min - 10),
+////									Imgproc.FONT_HERSHEY_SIMPLEX,
+////									0.5,
+////									new Scalar(255, 255, 255),
+////									2
+////							);
+////						}
+////					}
+////
+////					// Закрытие модели
+////					model.close();
+//
+//					// Возвращаем обработанное изображение
+//					return inputMat;
+//
+//				} catch (IOException e) {
+//					e.printStackTrace();
+//					// В случае ошибки возвращаем оригинальное изображение
+//					return inputFrame.rgba();
+//				}
+//			}
+
+
+
+
+
 		});
 
+		// Init OpenCV
 		if(OpenCVLoader.initLocal()){
 			org.opencv.core.Core.setUseOptimized(true);
-
 			cameraBridgeViewBase.enableView();
-
-//			try {
-//				InputStream inputStream = getAssets().open("lbpcascade_frontalface.xml");
-//				File file = new File(getDir("cascade", MODE_PRIVATE),"lbpcascade_frontalface.xml");
-//				FileOutputStream fileOutputStream = new FileOutputStream(file);
-
-//				byte[] data = new byte[4096];
-//				int read_bytes;
-//
-//				while((read_bytes = inputStream.read(data)) != -1){
-//					fileOutputStream.write(data,0,read_bytes);
-//				}
-
-//				cascadeClassifier = new CascadeClassifier(file.getAbsolutePath());
-
-//				// Проверка успешности загрузки
-//				if (cascadeClassifier.empty()) {
-//					Log.e("OpenCV", "Failed to load cascade classifier from file: " + file.getAbsolutePath());
-//					cascadeClassifier = null; // Обнулить объект, если загрузка не удалась
-//				} else {
-//					Log.d("OpenCV", "Cascade classifier loaded successfully!");
-//				}
-//
-//				inputStream.close();
-//				fileOutputStream.close();
-
-//				// Удалить временный файл, если не нужен
-//				boolean deleted = file.delete();
-//				if (!deleted) {
-//					Log.w("OpenCV", "Temporary cascade file was not deleted: " + file.getAbsolutePath());
-//				}
-//
-//			} catch (FileNotFoundException e) {
-//				e.printStackTrace();
-//			} catch (IOException e) {
-//				throw new RuntimeException(e);
-//			}
 		}
-
-		//-------------------------------
 
 		/* Create and set up the InputSurface for thermal image, imode setting is not final. */
 		inputSurface = new SurfaceMuxer.InputSurface(surfaceMuxer);
